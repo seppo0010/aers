@@ -1,12 +1,12 @@
 #![feature(unsafe_destructor)]
 #![feature(libc)]
+#![feature(core)]
 extern crate libc;
-
-use std::ptr;
 
 #[link(name = "ae")]
 
 extern {
+    #![allow(dead_code)]
     fn aeCreateEventLoop(setsize: libc::c_int) -> *mut libc::c_void;
     fn aeDeleteEventLoop(el: *mut libc::c_void);
     fn aeStop(el: *mut libc::c_void);
@@ -17,10 +17,10 @@ extern {
             proc_: extern fn(
                 el: *mut libc::c_void,
                 fd: libc::c_int,
-                clientData: *mut libc::c_void,
+                client_data: *const Fn(),
                 mask: libc::c_int
                 ),
-            clientData: *mut libc::c_void
+            client_data: *const Fn(),
             ) -> libc::c_int;
     fn aeDeleteFileEvent(
             el: *mut libc::c_void,
@@ -37,12 +37,12 @@ extern {
             proc_: extern fn(
                 el: *mut libc::c_void,
                 id: libc::c_longlong,
-                clientData: *mut libc::c_void
+                client_data: *const Fn()
                 ),
-            clientData: *mut libc::c_void,
+            client_data: *const Fn(),
             finalizerProc: extern fn(
                 el: *mut libc::c_void,
-                clientData: *mut libc::c_void
+                client_data: *const Fn()
                 )
             ) -> libc::c_longlong;
     fn aeDeleteTimeEvent(
@@ -72,18 +72,53 @@ extern {
 }
 
 pub struct EventLoop {
-    el: *mut libc::c_void
+    el: *mut libc::c_void,
+}
+
+extern fn time_event(el: *mut libc::c_void, id: libc::c_longlong, client_data: *const Fn()) {
+    unsafe { (*client_data)(); }
+}
+
+extern fn time_finalizer(el: *mut libc::c_void, client_data: *const Fn()) {
 }
 
 impl EventLoop {
     pub fn create(setsize: usize) -> EventLoop {
         unsafe {
             return EventLoop {
-                el: aeCreateEventLoop(setsize as libc::c_int)
+                el: aeCreateEventLoop(setsize as libc::c_int),
             }
         }
     }
+
+    pub fn create_time_event<'a>(
+            &mut self,
+            milliseconds: i64,
+            proc_: *const Fn()) {
+        unsafe {
+            let _ = aeCreateTimeEvent(
+                    self.el,
+                    milliseconds as libc::c_longlong,
+                    time_event,
+                    proc_,
+                    time_finalizer,
+                    );
+        }
+    }
+
+    pub fn main(&self) {
+        unsafe {
+            aeMain(self.el);
+        }
+    }
+
+    pub fn stop(&self) {
+        unsafe {
+            aeStop(self.el);
+        }
+    }
 }
+
 impl Drop for EventLoop {
     fn drop(&mut self) {
         unsafe {
